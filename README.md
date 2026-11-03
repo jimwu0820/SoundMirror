@@ -136,24 +136,6 @@ Build-EXE.bat
 
 scrcpy 有音频缓冲管理，一般比老的 sndcpy 稳很多。若长时间播放后出现累积延迟，点「停止转发」再「开始转发」重启一次链路。
 
-## 项目结构
-
-```
-SoundMirror/
-├── sound-mirror.ps1              # 主程序：WinForms 界面 + scrcpy 调用（约 600 行）
-├── src/
-│   └── SoundMirrorLauncher.cs    # exe 启动器源码（C#）
-├── SoundMirror.bat               # 备用启动入口
-├── Build-EXE.bat                 # 一键编译 exe
-├── Setup-Scrcpy.ps1              # 下载并校验 scrcpy
-├── app.ico                       # 应用图标（7 个尺寸）
-├── build_ico.py                  # 从 PNG 生成多尺寸 ICO
-├── screenshot.png                # 界面截图
-└── icon-preview-256.png
-```
-
-界面用 Windows 自带的 WinForms 实现，所有圆角、状态徽标、分段控件都是 `GraphicsPath` + `SmoothingMode.AntiAlias` 自绘——WinForms 原生控件只有直角，而 `Region` 裁切是硬边遮罩，边缘锯齿无法接受。
-
 ## 致谢
 
 - [scrcpy](https://github.com/Genymobile/scrcpy) — 音频转发与屏幕镜像的核心能力，作者 rom1v，Apache-2.0
