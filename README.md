@@ -41,19 +41,9 @@ A wireless casting tool for Windows: stream your phone's **audio only**, or **au
 
 ## 界面
 
-```
-┌──────────────────────────────────────────┐
-│ ●  未连接                          [日志] │
-│ ─────────────────────────────────────────│
-│ 连接方式                                  │
-│ [  Wi-Fi  ][  USB 数据线  ]               │
-│ 手机 IP                                   │
-│ [ 192.168.1.50                          ] │
-│ ☐ 同时显示手机画面                        │
-│ [            开始转发                    ] │
-│ 声音输出：Windows 默认播放设备            │
-└──────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="screenshot.png" width="422" alt="SoundMirror 主界面">
+</p>
 
 - 圆点是状态：灰=空闲，橙=连接中，绿=转发中，红=失败
 - 选「USB 数据线」时 IP 输入框自动禁用变灰，不需要填
@@ -158,6 +148,7 @@ SoundMirror/
 ├── Setup-Scrcpy.ps1              # 下载并校验 scrcpy
 ├── app.ico                       # 应用图标（7 个尺寸）
 ├── build_ico.py                  # 从 PNG 生成多尺寸 ICO
+├── screenshot.png                # 界面截图
 └── icon-preview-256.png
 ```
 
