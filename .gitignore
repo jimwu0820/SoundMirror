@@ -1,0 +1,20 @@
+# 第三方运行依赖（由 Setup-Scrcpy.ps1 自动下载，不进仓库）
+scrcpy/
+
+# 构建产物
+SoundMirror.exe
+src/*.exe
+*.pdb
+
+# 运行期文件
+scrcpy-log.txt
+last-ip.txt
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统文件
+Thumbs.db
+desktop.ini
