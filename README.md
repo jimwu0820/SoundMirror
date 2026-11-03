@@ -146,10 +146,6 @@ Build-EXE.bat
 
 scrcpy 有音频缓冲管理，一般比老的 sndcpy 稳很多。若长时间播放后出现累积延迟，点「停止转发」再「开始转发」重启一次链路。
 
-**桌面图标还是旧的 PowerShell 图标**
-
-程序已经在启动时调用了 `SetCurrentProcessExplicitAppUserModelID`，让任务栏把它当成独立应用而非 `powershell.exe`，并显式写入了窗口大小图标。如果仍显示旧图标，说明 Windows 图标缓存没刷新，重启资源管理器或在桌面按 F5。
-
 ## 项目结构
 
 ```
