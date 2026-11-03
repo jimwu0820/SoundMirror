@@ -283,10 +283,21 @@ $pnlIp.Controls.Add($txtIp)
 $chkVideo = New-Object System.Windows.Forms.CheckBox
 $chkVideo.Text = '同时显示手机画面'
 $chkVideo.Location = New-Object System.Drawing.Point(20, 196)
-$chkVideo.Size = New-Object System.Drawing.Size(240, 24)
+$chkVideo.Size = New-Object System.Drawing.Size(186, 24)
 $chkVideo.Font = $fBase
 $chkVideo.ForeColor = ToColor $C.TextSecond
 $chkVideo.BackColor = [System.Drawing.Color]::Transparent
+
+# 手机熄屏但保持渲染：scrcpy 的 --turn-screen-off。
+# 注意这和"让手机自然息屏"不是一回事：Android 息屏后合成器停止工作，
+# 镜像会黑掉；scrcpy 的做法是关掉物理屏幕、保留渲染，所以画面照常传过来。
+$chkScreenOff = New-Object System.Windows.Forms.CheckBox
+$chkScreenOff.Text = '投屏时手机熄屏'
+$chkScreenOff.Location = New-Object System.Drawing.Point(212, 196)
+$chkScreenOff.Size = New-Object System.Drawing.Size(180, 24)
+$chkScreenOff.Font = $fBase
+$chkScreenOff.ForeColor = ToColor $C.TextSecond
+$chkScreenOff.BackColor = [System.Drawing.Color]::Transparent
 
 $btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 377 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
 
@@ -307,7 +318,7 @@ $lblOut.Font = $fSmall
 $lblOut.ForeColor = ToColor $C.TextTert
 $lblOut.BackColor = [System.Drawing.Color]::Transparent
 
-$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $btnMain, $lblError, $lblOut))
+$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $btnMain, $lblError, $lblOut))
 
 $logForm = New-Object System.Windows.Forms.Form
 $logForm.Text = 'SoundMirror · Log'
@@ -430,6 +441,12 @@ function Start-Stream {
     $videoArg = ''
     if (-not $chkVideo.Checked) { $videoArg = '--no-video' }
 
+    $screenArg = ''
+    if ($chkScreenOff.Checked) {
+        $screenArg = '--turn-screen-off'
+        Add-Log '手机屏幕将在连接后关闭，画面仍会继续传输'
+    }
+
     Set-UiState 'connecting'
     $form.Refresh()
 
@@ -477,7 +494,7 @@ function Start-Stream {
 
     if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
 
-    $cmdArgs = "/c scrcpy.exe $selArg $videoArg > `"$logFile`" 2>&1"
+    $cmdArgs = "/c scrcpy.exe $selArg $videoArg $screenArg > `"$logFile`" 2>&1"
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = 'cmd.exe'
