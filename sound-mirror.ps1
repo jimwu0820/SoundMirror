@@ -77,7 +77,7 @@ $script:mode = 'wifi'
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'SoundMirror'
-$form.ClientSize = New-Object System.Drawing.Size(420, 342)
+$form.ClientSize = New-Object System.Drawing.Size(420, 318)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -299,23 +299,11 @@ $chkScreenOff.Font = $fBase
 $chkScreenOff.ForeColor = ToColor $C.TextSecond
 $chkScreenOff.BackColor = [System.Drawing.Color]::Transparent
 
-# 键盘：scrcpy 默认 --keyboard=sdk，直接把电脑的按键事件注入到手机当前焦点输入框，
-# 英数符号立刻可用。但中文不行——输入法是在电脑侧组成文字的，sdk 模式只发键码，
-# 手机拿到的是拼音字母。--keyboard=uhid 会在手机上模拟一块物理键盘，
-# 文字改由手机的输入法去组，中文就能打出来。
-$chkKbd = New-Object System.Windows.Forms.CheckBox
-$chkKbd.Text = '键盘用手机输入法（可打中文）'
-$chkKbd.Location = New-Object System.Drawing.Point(20, 222)
-$chkKbd.Size = New-Object System.Drawing.Size(377, 24)
-$chkKbd.Font = $fBase
-$chkKbd.ForeColor = ToColor $C.TextSecond
-$chkKbd.BackColor = [System.Drawing.Color]::Transparent
-
-$btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 252 -W 377 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
+$btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 377 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
 
 $lblError = New-Object System.Windows.Forms.Label
 $lblError.Text = ''
-$lblError.Location = New-Object System.Drawing.Point(20, 298)
+$lblError.Location = New-Object System.Drawing.Point(20, 274)
 $lblError.Size = New-Object System.Drawing.Size(377, 18)
 $lblError.Font = $fSmall
 $lblError.ForeColor = ToColor $C.Red
@@ -324,13 +312,13 @@ $lblError.Visible = $false
 
 $lblOut = New-Object System.Windows.Forms.Label
 $lblOut.Text = '声音输出：Windows 默认播放设备'
-$lblOut.Location = New-Object System.Drawing.Point(20, 318)
+$lblOut.Location = New-Object System.Drawing.Point(20, 294)
 $lblOut.Size = New-Object System.Drawing.Size(377, 18)
 $lblOut.Font = $fSmall
 $lblOut.ForeColor = ToColor $C.TextTert
 $lblOut.BackColor = [System.Drawing.Color]::Transparent
 
-$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $chkKbd, $btnMain, $lblError, $lblOut))
+$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $btnMain, $lblError, $lblOut))
 
 $logForm = New-Object System.Windows.Forms.Form
 $logForm.Text = 'SoundMirror · Log'
@@ -459,21 +447,12 @@ function Start-Stream {
         Add-Log '手机屏幕将在连接后关闭，画面仍会继续传输'
     }
 
-    # 键盘模式：不勾走 scrcpy 默认的 sdk（英数符号可直输），
-    # 勾上走 uhid（手机侧模拟物理键盘，交给手机的输入法组词，中文可用）。
-    $kbdArg = ''
-    if ($chkKbd.Checked) {
-        $kbdArg = '--keyboard=uhid'
-        Add-Log '键盘: 手机输入法模式（手机上会多出一块"物理键盘"，可直接打中文）'
-        if ($chkVideo.Checked -eq $false) {
-            Add-Log '提示: 未勾选「同时显示手机画面」，没有镜像窗口可以接收按键，键盘模式不起作用'
-        }
-        if ($chkScreenOff.Checked) {
-            Add-Log '提示: 手机熄屏时输入法的候选词窗口无法显示，建议打中文时不要同时熄屏'
-        }
-    } else {
-        Add-Log '键盘: 默认模式（点击镜像窗口后可直接输入英文、数字、符号）'
-    }
+    # 键盘：uhid 模式会在手机上注册一块虚拟物理键盘（设备名就叫 scrcpy），
+    # 按键走的是手机的输入子系统，文字交给手机自己的输入法去组词 —— 这样中文才能打出来。
+    # 对照：sdk 模式只把键码注入焦点输入框，输入法在电脑侧组词，手机拿到的是拼音字母。
+    # 前提是手机「外接键盘时显示输入法」已开启（show_ime_with_hard_keyboard=1），
+    # 否则输入法不弹出，打拼音就没有候选词。启动时脚本会自动检查并纠正这一项。
+    $kbdArg = '--keyboard=uhid'
 
     Set-UiState 'connecting'
     $form.Refresh()
@@ -518,6 +497,20 @@ function Start-Stream {
             return
         }
         $selArg = "-s ${target}"
+    }
+
+    # uhid 依赖手机在外接键盘时仍然弹出输入法，否则打拼音没有候选词。
+    # 这一项在部分机型/输入法上是关的，启动前查一次，不是 1 就顺手打开（无需 root）。
+    try {
+        if ($script:mode -eq 'usb') { $adbSelArgs = @('-d') } else { $adbSelArgs = @('-s', $target) }
+        $imeFlag = (& $adbExe @adbSelArgs shell settings get secure show_ime_with_hard_keyboard 2>$null | Out-String).Trim()
+        if ($imeFlag -ne '1') {
+            & $adbExe @adbSelArgs shell settings put secure show_ime_with_hard_keyboard 1 2>$null | Out-Null
+            Add-Log '已开启手机的「外接键盘时显示输入法」，中文输入需要它'
+        }
+    } catch {
+        Add-Log '提示: 无法读取输入法设置，若打不出中文请到手机 设置→系统和更新→语言和输入法 里'
+        Add-Log '      勾选「外接键盘时显示输入法」'
     }
 
     if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
@@ -632,7 +625,6 @@ Add-Log '  Wi-Fi : 填手机 WLAN 里的 IP，端口固定 5555'
 Add-Log '  USB   : 选「USB 数据线」，无需 IP'
 Add-Log ''
 Add-Log '键盘输入：连上后点一下镜像窗口让它获得焦点，即可直接打字。'
-Add-Log '  默认模式可输英文/数字/符号；要打中文，勾选「键盘用手机输入法」。'
-Add-Log '  复制电脑上的中文按 Ctrl+V 也能粘贴到手机（临时应付几个字最快）。'
+Add-Log '  中文走手机输入法组词，手机上会看到候选词；打不出中文时用 Ctrl+V 粘贴兜底。'
 
 [void]$form.ShowDialog()
