@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon-preview-256.png" width="120" alt="SoundMirror icon">
+  <img src="icon-preview-256.png" width="120" height="120" alt="SoundMirror icon">
 </p>
 
 <h1 align="center">SoundMirror</h1>
