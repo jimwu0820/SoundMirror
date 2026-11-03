@@ -5,7 +5,7 @@
 <h1 align="center">SoundMirror</h1>
 
 <p align="center">
-  把手机的声音和画面接到 Windows 电脑上 —— 走 Wi-Fi 或 USB，<b>完全不占用蓝牙</b>。
+  无线投屏工具：可选<b>只投音频</b>，或<b>音频与画面一起投</b>到电脑 —— 走 Wi-Fi 或 USB，<b>完全不占用蓝牙</b>。
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ---
 
-A lightweight Windows GUI for [scrcpy](https://github.com/Genymobile/scrcpy): stream your phone's **audio** (and optionally its **screen**) to your PC over Wi-Fi or USB, without touching Bluetooth. Chinese UI, single-file script, no installation.
+A wireless casting tool for Windows: stream your phone's **audio only**, or **audio together with the screen**, to your PC over Wi-Fi or USB — without touching Bluetooth. Chinese UI, single-file script, no installation.
 
 ## 为什么做这个
 
