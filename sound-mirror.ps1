@@ -306,7 +306,7 @@ $btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 266 -H 42 
 # 运行时息屏：走 scrcpy 窗口的 MOD+o / MOD+Shift+o 快捷键。
 # 不能用 adb 的 power 键 —— 那会让设备真正休眠，采集端拿不到新帧，镜像直接黑掉。
 # scrcpy 的做法是只关显示面板、保留表面合成，所以画面照常传。
-$btnScreen = New-PillButton -DisplayText '手机息屏' -X 294 -Y 228 -W 103 -H 42 -Radius 11 -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark -FontSize 9.5 -HoverFill $C.SurfaceDim
+$btnScreen = New-PillButton -DisplayText '手机熄屏' -X 294 -Y 228 -W 103 -H 42 -Radius 11 -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark -FontSize 9.5 -HoverFill $C.SurfaceDim
 
 $lblError = New-Object System.Windows.Forms.Label
 $lblError.Text = ''
@@ -534,6 +534,10 @@ function Start-Stream {
     try {
         $script:proc = [System.Diagnostics.Process]::Start($psi)
         Set-UiState 'running'
+        # 勾了「投屏时手机熄屏」的话，scrcpy 连上就把面板关了，按钮文案要跟着是「点亮屏幕」
+        $script:screenOff = [bool]$chkScreenOff.Checked
+        Set-ScreenLabel
+        $btnScreen.Invalidate()
         $timer.Start()
         $screenTimer.Start()
     } catch {
@@ -555,7 +559,8 @@ function Stop-Stream {
 
     $timer.Stop()
     $screenTimer.Stop()
-    Set-Pill -Ctrl $btnScreen -Display '手机息屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
+    $script:screenOff = $false
+    Set-ScreenLabel
     Set-UiState 'idle'
 }
 
@@ -563,86 +568,150 @@ $btnMain.Add_Click({
     if ($script:state -eq 'running') { Stop-Stream } else { Start-Stream }
 })
 
-# ==== 运行时息屏 / 点亮 ====
-# 取当前设备的 adb 选择参数（USB 用 -d，Wi-Fi 用 -s ip:5555）
-function Get-AdbSelArgs {
-    if ($script:mode -eq 'usb') { return @('-d') }
-    $ip = $txtIp.Text.Trim()
-    if ($ip) { return @('-s', "${ip}:5555") }
-    return @()
+# ==== 运行时熄屏 / 点亮 ====
+# scrcpy 只认自己窗口上的快捷键：MOD+o 关显示面板、MOD+Shift+o 点亮（MOD 默认左 Alt）。
+# 不能用 adb 的电源键：那会让设备真正休眠，采集端拿不到新帧，镜像直接黑掉。
+#
+# 两条实测结论，代码是照它们写的：
+# 1) 送键用 AppActivate + SendKeys 就够，不需要 P/Invoke 编译代码 —— 本机安全策略会拦 Add-Type，
+#    依赖它的话整条链路会静默失效。
+# 2) 不能用 dumpsys display 的 mScreenState 判断真实状态：scrcpy 关的是 SurfaceFlinger 的显示电源，
+#    DisplayManager 那边照样报 ON。照它判断会让文案永远切不过去、每次点击都发同一条指令。
+#    可靠信号是 scrcpy 自己写进日志的那行 Device display turned off / on，一次切换一行。
+
+$script:screenOff = $false
+
+function Test-IsStreaming {
+    return [bool]($script:proc -and -not $script:proc.HasExited)
 }
 
-# 读屏幕开关状态：dumpsys display 里的 mScreenState=ON/OFF
-function Get-PhoneScreenState {
+function Get-LogLength {
     try {
-        $sel = Get-AdbSelArgs
-        $out = (& $adbExe @sel shell dumpsys display 2>$null | Out-String)
-        if ($out -match 'mScreenState=(ON|OFF)') { return $matches[1] }
+        if (Test-Path -LiteralPath $logFile) { return [long](Get-Item -LiteralPath $logFile).Length }
+    } catch { }
+    return [long]0
+}
+
+function Get-LogFrom([long]$pos) {
+    try {
+        $fs = [System.IO.File]::Open($logFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            [void]$fs.Seek($pos, [System.IO.SeekOrigin]::Begin)
+            $sr = New-Object System.IO.StreamReader($fs)
+            $txt = $sr.ReadToEnd()
+            $sr.Dispose()
+            return $txt
+        } finally { $fs.Dispose() }
     } catch { }
     return ''
 }
 
-function Send-ScrcpyScreenShortcut([switch]$Wake) {
-    $hwnd = [IntPtr]::Zero
-    foreach ($p in @(Get-Process scrcpy -ErrorAction SilentlyContinue)) {
-        if ($p.MainWindowHandle -ne 0) { $hwnd = $p.MainWindowHandle; break }
+function Set-ScreenLabel {
+    if ($script:screenOff) {
+        Set-Pill -Ctrl $btnScreen -Display '点亮屏幕' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
+    } else {
+        Set-Pill -Ctrl $btnScreen -Display '手机熄屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
     }
-    if ($hwnd -eq [IntPtr]::Zero) { return $false }
-
-    $prev = [IntPtr]::Zero
-    try {
-        $prev = [NativeConsole]::GetForegroundWindow()
-        [void][NativeConsole]::ShowWindow($hwnd, 9)          # SW_RESTORE
-        [void][NativeConsole]::SetForegroundWindow($hwnd)
-        Start-Sleep -Milliseconds 220
-
-        $VK_MENU = 0x12; $VK_SHIFT = 0x10; $VK_O = 0x4F; $UP = 2
-        [NativeConsole]::keybd_event($VK_MENU, 0, 0, [UIntPtr]::Zero)
-        if ($Wake) { [NativeConsole]::keybd_event($VK_SHIFT, 0, 0, [UIntPtr]::Zero) }
-        [NativeConsole]::keybd_event($VK_O, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 70
-        [NativeConsole]::keybd_event($VK_O, 0, $UP, [UIntPtr]::Zero)
-        if ($Wake) { [NativeConsole]::keybd_event($VK_SHIFT, 0, $UP, [UIntPtr]::Zero) }
-        [NativeConsole]::keybd_event($VK_MENU, 0, $UP, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 200
-
-        if ($prev -ne [IntPtr]::Zero) { [void][NativeConsole]::SetForegroundWindow($prev) }
-    } catch {
-        return $false
-    }
-    return $true
 }
 
-function Update-ScreenButton {
-    $st = Get-PhoneScreenState
-    if ($st -eq 'OFF') { Set-Pill -Ctrl $btnScreen -Display '点亮屏幕' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark }
-    else { Set-Pill -Ctrl $btnScreen -Display '手机息屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark }
+# 用户在镜像窗口里自己按了 MOD+o 也会写日志，用它纠正按钮文案
+function Sync-ScreenStateFromLog {
+    try {
+        if (-not (Test-Path -LiteralPath $logFile)) { return }
+        $txt = (Get-Content -LiteralPath $logFile -Tail 300 -ErrorAction SilentlyContinue | Out-String)
+        $iOff = $txt.LastIndexOf('Device display turned off')
+        $iOn = $txt.LastIndexOf('Device display turned on')
+        if ($iOff -lt 0 -and $iOn -lt 0) { return }
+        $off = ($iOff -gt $iOn)
+        if ($off -ne $script:screenOff) {
+            $script:screenOff = $off
+            Set-ScreenLabel
+        }
+    } catch { }
+}
+
+# 往镜像窗口送一次 MOD+o / MOD+Shift+o，返回 ok / no_window / no_com / no_focus / no_effect / send_error:xxx
+function Send-ScrcpyScreenKey([switch]$Wake) {
+    $sp = @(Get-Process scrcpy -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+    if ($sp.Count -eq 0) { return 'no_window' }
+
+    $shell = $null
+    try { $shell = New-Object -ComObject WScript.Shell } catch { return 'no_com' }
+
+    $before = Get-LogLength
+    $act = $false
+    try { $act = [bool]$shell.AppActivate([int]$sp[0].Id) } catch { }
+    if (-not $act) { try { $act = [bool]$shell.AppActivate($sp[0].MainWindowTitle) } catch { } }
+    if (-not $act) {
+        try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+        return 'no_focus'
+    }
+
+    Start-Sleep -Milliseconds 180
+    try {
+        if ($Wake) { [System.Windows.Forms.SendKeys]::SendWait('%+o') }
+        else { [System.Windows.Forms.SendKeys]::SendWait('%o') }
+    } catch {
+        $msg = $_.Exception.Message
+        try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+        return ('send_error:' + $msg)
+    }
+
+    # 焦点还给本程序，否则后面的输入会跑到镜像窗口里去
+    Start-Sleep -Milliseconds 100
+    try { [void]$shell.AppActivate([int][System.Diagnostics.Process]::GetCurrentProcess().Id) } catch { }
+    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+    try { $form.Activate() } catch { }
+
+    # 以 scrcpy 日志里新增的那一行作为「指令真的执行了」的证据
+    for ($i = 0; $i -lt 12; $i++) {
+        Start-Sleep -Milliseconds 120
+        $new = Get-LogFrom $before
+        if ($new -and ($new -match 'Device display turned (on|off)')) {
+            if ($new -match 'Device display turned off') { $script:screenOff = $true }
+            elseif ($new -match 'Device display turned on') { $script:screenOff = $false }
+            else { $script:screenOff = -not $Wake }
+            return 'ok'
+        }
+    }
+    return 'no_effect'
 }
 
 $btnScreen.Add_Click({
-    if (-not ($script:proc -and -not $script:proc.HasExited)) {
-        Add-Log '请先点「开始转发」，息屏控制只在投屏运行时可切换'
-        Add-Log '  静态息屏可以勾选「投屏时手机熄屏」，连接成功后自动关屏'
+    if (-not (Test-IsStreaming)) {
+        Add-Log '需要先点「开始转发」——熄屏控制是切镜像窗口的快捷键，没有窗口就无从发起'
+        Add-Log '  想在连上时就熄屏，勾「投屏时手机熄屏」即可'
         return
     }
 
-    $state = Get-PhoneScreenState
-    if (-not $state) {
-        Add-Log '读不到手机屏幕状态，可能连接已断开'
-        return
-    }
+    $wantWake = $script:screenOff
+    if ($wantWake) { Add-Log '正在点亮手机屏幕…' } else { Add-Log '正在关闭手机屏幕…' }
+    $form.Refresh()
 
-    $wantWake = ($state -eq 'OFF')
-    if (Send-ScrcpyScreenShortcut -Wake:$wantWake) {
-        Start-Sleep -Milliseconds 500
-        $now = Get-PhoneScreenState
-        if ($now -eq 'OFF') { Add-Log '手机屏幕已关闭，画面继续传输（点亮请再点一次本按钮）' }
-        elseif ($now -eq 'ON') { Add-Log '手机屏幕已点亮' }
-        Update-ScreenButton
-    } else {
-        Add-Log '没有找到镜像窗口，无法发送息屏指令'
-        Add-Log '  纯音频模式（未勾「同时显示手机画面」）没有窗口，请直接按手机电源键'
+    $r = Send-ScrcpyScreenKey -Wake:$wantWake
+    switch ($r) {
+        'ok' {
+            if ($script:screenOff) { Add-Log '手机屏幕已关闭，画面继续传输（再点一次可点亮）' }
+            else { Add-Log '手机屏幕已点亮' }
+        }
+        'no_window' {
+            Add-Log '没有找到镜像窗口（纯音频模式没有窗口），这种情况直接按手机电源键'
+        }
+        'no_com' {
+            Add-Log '系统拦住了按键模拟通道，无法自动熄屏，请直接按手机电源键'
+        }
+        'no_focus' {
+            Add-Log '切不过去镜像窗口（可能被全屏程序占着），先点一下镜像窗口再点本按钮'
+        }
+        'no_effect' {
+            Add-Log '指令发出去了但 scrcpy 没响应，先点一下镜像窗口再试一次'
+        }
+        default {
+            Add-Log ('发送失败: ' + $r)
+        }
     }
+    Set-ScreenLabel
+    $btnScreen.Invalidate()
 })
 
 $btnWifi.Add_Click({ Set-Mode 'wifi' })
@@ -698,12 +767,12 @@ $uiTimer.Add_Tick({
 })
 $uiTimer.Start()
 
-# 启动后等 scrcpy 窗口出来，刷新一次息屏按钮的文案（初始可能是退出时残留的熄屏状态）
+# 运行中每 2 秒跟一次 scrcpy 日志，同步熄屏状态（用户在镜像窗口里自己按 MOD+o 也算）
 $screenTimer = New-Object System.Windows.Forms.Timer
-$screenTimer.Interval = 2500
+$screenTimer.Interval = 2000
 $screenTimer.Add_Tick({
-    $screenTimer.Stop()
-    if ($script:state -eq 'running') { Update-ScreenButton }
+    if ($script:state -ne 'running') { return }
+    Sync-ScreenStateFromLog
 })
 
 $guardTimer = New-Object System.Windows.Forms.Timer
