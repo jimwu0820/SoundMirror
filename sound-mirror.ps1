@@ -28,7 +28,7 @@ if ($script:hasNative) {
     try { [void][NativeConsole]::SetCurrentProcessExplicitAppUserModelID('SoundMirror.App.1') } catch { }
 }
 
-$appVersion = '0.2.0'
+$appVersion = '0.2.1'
 
 $scriptDir = $PSScriptRoot
 $scrcpyDir = Join-Path $scriptDir 'scrcpy\scrcpy-win64-v5.0.1'
@@ -80,7 +80,7 @@ $script:state = 'idle'
 $script:mode = 'wifi'
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "SoundMirror $appVersion"
+$form.Text = 'SoundMirror'
 $form.ClientSize = New-Object System.Drawing.Size(420, 318)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
@@ -400,8 +400,8 @@ function Set-UiState([string]$State, [string]$Text) {
     # 托盘菜单和提示跟着状态走（托盘还没建好时跳过）
     if ($script:tray) {
         try {
-            if ($State -eq 'running') { $script:tray.Text = "SoundMirror $appVersion · 正在转发" }
-            else { $script:tray.Text = "SoundMirror $appVersion · 未连接" }
+            if ($State -eq 'running') { $script:tray.Text = 'SoundMirror · 正在转发' }
+            else { $script:tray.Text = 'SoundMirror · 未连接' }
             if ($script:miToggle) {
                 if ($State -eq 'running') { $script:miToggle.Text = '停止转发' }
                 else { $script:miToggle.Text = '开始转发' }
@@ -444,7 +444,7 @@ function Show-Failure([string]$msg) {
     Set-UiState 'error'
     # 收在托盘里的时候，出错要能让人看见
     if ($script:tray -and -not $form.Visible) {
-        Show-Toast "SoundMirror $appVersion 出问题了" $msg
+        Show-Toast 'SoundMirror 出问题了' $msg
     }
 }
 
@@ -759,7 +759,7 @@ function Hide-ToTray {
     $form.Hide()
     if (-not $script:trayHinted) {
         $script:trayHinted = $true
-        Show-Toast "SoundMirror $appVersion 还在后台运行" '双击右下角图标可以回到界面；要真正退出请右键选「退出」'
+        Show-Toast 'SoundMirror 还在后台运行' '双击右下角图标可以回到界面；要真正退出请右键选「退出」'
     }
 }
 
@@ -769,7 +769,7 @@ if (Test-Path $icoPath) {
 } else {
     $tray.Icon = $form.Icon
 }
-$tray.Text = "SoundMirror $appVersion · 未连接"
+$tray.Text = 'SoundMirror · 未连接'
 $tray.Visible = $true
 
 # ==== 自绘提示窗 ====
