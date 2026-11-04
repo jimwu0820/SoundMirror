@@ -394,6 +394,19 @@ function Set-UiState([string]$State, [string]$Text) {
         }
     }
     if ($Text) { $lblState.Text = $Text }
+
+    # 托盘菜单和提示跟着状态走（托盘还没建好时跳过）
+    if ($script:tray) {
+        try {
+            if ($State -eq 'running') { $script:tray.Text = 'SoundMirror · 正在转发' }
+            else { $script:tray.Text = 'SoundMirror · 未连接' }
+            if ($script:miToggle) {
+                if ($State -eq 'running') { $script:miToggle.Text = '停止转发' }
+                else { $script:miToggle.Text = '开始转发' }
+            }
+            if ($script:miScreen) { $script:miScreen.Enabled = ($State -eq 'running') }
+        } catch { }
+    }
 }
 
 function Set-Mode([string]$Mode) {
@@ -427,6 +440,10 @@ function Show-Failure([string]$msg) {
     $lblError.Text = $msg
     $lblError.Visible = $true
     Set-UiState 'error'
+    # 收在托盘里的时候，出错要能让人看见
+    if ($script:tray -and -not $form.Visible) {
+        try { $script:tray.ShowBalloonTip(4000, 'SoundMirror 出问题了', $msg, 'Warning') } catch { }
+    }
 }
 
 function Start-Stream {
@@ -710,12 +727,81 @@ $timer.Add_Tick({
 
 $form.Add_FormClosing({
     param($s, $e)
-    if ($script:state -eq 'running') {
-        $r = [System.Windows.Forms.MessageBox]::Show('正在转发中，确定要停止并退出吗？', '确认', 'YesNo', 'Question')
-        if ($r -ne 'Yes') { $e.Cancel = $true; return }
+    if ($script:reallyExit) {
+        Stop-Stream
+        return
     }
-    Stop-Stream
+    # 点 X 不退出：收进托盘继续后台跑（转发不会被掐断）
+    $e.Cancel = $true
+    Hide-ToTray
 })
+
+# ==== 托盘：后台运行 ====
+$script:reallyExit = $false
+$script:trayHinted = $false
+
+function Show-Main {
+    try {
+        $form.ShowInTaskbar = $true
+        if ($form.WindowState -eq 'Minimized') { $form.WindowState = 'Normal' }
+        $form.Show()
+        $form.Activate()
+        if ($script:hasNative) { [void][NativeConsole]::SetForegroundWindow($form.Handle) }
+        $sh = New-Object -ComObject WScript.Shell
+        [void]$sh.AppActivate([int][System.Diagnostics.Process]::GetCurrentProcess().Id)
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($sh)
+    } catch { }
+}
+
+function Hide-ToTray {
+    $form.Hide()
+    if (-not $script:trayHinted) {
+        $script:trayHinted = $true
+        try {
+            $tray.ShowBalloonTip(3000, 'SoundMirror 还在后台运行',
+                '双击右下角图标可以回到界面；要真正退出请右键选「退出」', 'Info')
+        } catch { }
+    }
+}
+
+$tray = New-Object System.Windows.Forms.NotifyIcon
+if (Test-Path $icoPath) {
+    try { $tray.Icon = New-Object System.Drawing.Icon($icoPath) } catch { $tray.Icon = $form.Icon }
+} else {
+    $tray.Icon = $form.Icon
+}
+$tray.Text = 'SoundMirror · 未连接'
+$tray.Visible = $true
+
+$trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
+$miShow   = $trayMenu.Items.Add('显示主界面')
+$miToggle = $trayMenu.Items.Add('开始转发')
+$miScreen = $trayMenu.Items.Add('手机熄屏')
+[void]$trayMenu.Items.Add('-')
+$miExit   = $trayMenu.Items.Add('退出')
+$miScreen.Enabled = $false
+$tray.ContextMenuStrip = $trayMenu
+
+$miShow.Add_Click({ Show-Main })
+$miToggle.Add_Click({ Show-Main; $btnMain.PerformClick() })
+$miScreen.Add_Click({ $btnScreen.PerformClick() })
+$miExit.Add_Click({
+    $script:reallyExit = $true
+    try { $tray.Visible = $false; $tray.Dispose() } catch { }
+    $form.Close()
+})
+$tray.Add_MouseDoubleClick({ Show-Main })
+
+# 最小化也收进托盘，别在任务栏留一个空壳
+$form.Add_Resize({
+    if ($form.WindowState -eq 'Minimized') { Hide-ToTray }
+})
+
+# 托盘菜单和提示文字跟着界面状态走
+$script:miToggle = $miToggle
+$script:miScreen = $miScreen
+$script:tray = $tray
+
 
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 400
@@ -758,3 +844,5 @@ Add-Log '键盘输入：连上后点一下镜像窗口让它获得焦点，即�
 Add-Log '  中文走手机输入法组词，手机上会看到候选词；打不出中文时用 Ctrl+V 粘贴兜底。'
 
 [void]$form.ShowDialog()
+
+try { $tray.Visible = $false; $tray.Dispose() } catch { }
