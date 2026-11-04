@@ -290,17 +290,6 @@ $chkVideo.Font = $fBase
 $chkVideo.ForeColor = ToColor $C.TextSecond
 $chkVideo.BackColor = [System.Drawing.Color]::Transparent
 
-# 手机熄屏但保持渲染：scrcpy 的 --turn-screen-off。
-# 注意这和"让手机自然息屏"不是一回事：Android 息屏后合成器停止工作，
-# 镜像会黑掉；scrcpy 的做法是关掉物理屏幕、保留渲染，所以画面照常传过来。
-$chkScreenOff = New-Object System.Windows.Forms.CheckBox
-$chkScreenOff.Text = '投屏时手机熄屏'
-$chkScreenOff.Location = New-Object System.Drawing.Point(212, 196)
-$chkScreenOff.Size = New-Object System.Drawing.Size(180, 24)
-$chkScreenOff.Font = $fBase
-$chkScreenOff.ForeColor = ToColor $C.TextSecond
-$chkScreenOff.BackColor = [System.Drawing.Color]::Transparent
-
 $btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 266 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
 
 # 运行时息屏：走 scrcpy 窗口的 MOD+o / MOD+Shift+o 快捷键。
@@ -325,7 +314,7 @@ $lblOut.Font = $fSmall
 $lblOut.ForeColor = ToColor $C.TextTert
 $lblOut.BackColor = [System.Drawing.Color]::Transparent
 
-$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $btnMain, $btnScreen, $lblError, $lblOut))
+$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $btnMain, $btnScreen, $lblError, $lblOut))
 
 $logForm = New-Object System.Windows.Forms.Form
 $logForm.Text = 'SoundMirror · Log'
@@ -448,12 +437,6 @@ function Start-Stream {
     $videoArg = ''
     if (-not $chkVideo.Checked) { $videoArg = '--no-video' }
 
-    $screenArg = ''
-    if ($chkScreenOff.Checked) {
-        $screenArg = '--turn-screen-off'
-        Add-Log '手机屏幕将在连接后关闭，画面仍会继续传输'
-    }
-
     # 键盘：uhid 模式会在手机上注册一块虚拟物理键盘（设备名就叫 scrcpy），
     # 按键走的是手机的输入子系统，文字交给手机自己的输入法去组词 —— 这样中文才能打出来。
     # 对照：sdk 模式只把键码注入焦点输入框，输入法在电脑侧组词，手机拿到的是拼音字母。
@@ -522,7 +505,7 @@ function Start-Stream {
 
     if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
 
-    $cmdArgs = "/c scrcpy.exe $selArg $videoArg $screenArg $kbdArg > `"$logFile`" 2>&1"
+    $cmdArgs = "/c scrcpy.exe $selArg $videoArg $kbdArg > `"$logFile`" 2>&1"
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = 'cmd.exe'
@@ -534,7 +517,6 @@ function Start-Stream {
     try {
         $script:proc = [System.Diagnostics.Process]::Start($psi)
         Set-UiState 'running'
-        # 勾了「投屏时手机熄屏」的话，scrcpy 连上就把面板关了
         Set-ScreenLabel
         $btnScreen.Invalidate()
         $timer.Start()
@@ -672,7 +654,6 @@ function Send-ScrcpyScreenKey {
 $btnScreen.Add_Click({
     if (-not (Test-IsStreaming)) {
         Add-Log '需要先点「开始转发」——熄屏是切镜像窗口的快捷键，没有窗口就无从发起'
-        Add-Log '  想在连上时就熄屏，勾「投屏时手机熄屏」即可'
         return
     }
 
