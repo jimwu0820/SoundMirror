@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey">
   <img alt="PowerShell" src="https://img.shields.io/badge/PowerShell-5.1%2B-5391FE">
 </p>
@@ -37,6 +38,8 @@ A wireless casting tool for Windows: stream your phone's **audio only**, or **au
 | **蓝牙保持空闲** | 音频走 USB / Wi-Fi，蓝牙耳机照常用于电脑 |
 | **失败有话说** | 连不上时不用猜——界面直接给出下一步排查方向，日志窗口可看原始输出 |
 | **图形界面** | 输入 IP → 点开始，不用记命令行参数 |
+| **手机熄屏** | 转发过程中一键关掉手机面板，画面照常传输、不断流 |
+| **后台常驻** | 关窗口或最小化即收进托盘，转发不中断；托盘菜单可直接启停 |
 | **原生 exe** | 可编译成无控制台窗口的 exe，图标、版本信息齐全 |
 
 ## 界面
@@ -47,7 +50,10 @@ A wireless casting tool for Windows: stream your phone's **audio only**, or **au
 
 - 圆点是状态：灰=空闲，橙=连接中，绿=转发中，红=失败
 - 选「USB 数据线」时 IP 输入框自动禁用变灰，不需要填
-- 转发中同一个按钮变成「停止转发」，关窗口会二次确认
+- 转发中同一个按钮变成「停止转发」
+- 右上角「日志」看 scrcpy 原始输出，连不上时先看它
+- 右侧「手机熄屏」只关手机面板，镜像照常；点亮请按手机电源键（见下方说明）
+- 点关闭或最小化都会收进托盘，转发继续；要退出请右键托盘图标选「退出」
 
 ## 环境要求
 
@@ -135,6 +141,30 @@ Build-EXE.bat
 **Wi-Fi 下延迟越来越大**
 
 scrcpy 有音频缓冲管理，一般比老的 sndcpy 稳很多。若长时间播放后出现累积延迟，点「停止转发」再「开始转发」重启一次链路。
+
+**点了「手机熄屏」，怎么点亮？**
+
+按一下手机电源键即可。熄屏走的是 SurfaceFlinger 的显示电源开关，**设备并没有真正休眠**，所以按一下就回到原来的界面，不用重新连接。
+
+程序不提供「点亮」按钮，是因为在部分机型（实测华为 HarmonyOS）上，scrcpy 的 `MOD+Shift+o` 只能把 SurfaceFlinger 的电源恢复成 On、亮度读数也正常，但面板背光不会回来；唯一能点亮的是走一次系统电源周期，而那必然落到锁屏、要解锁一次——代价比按一下电源键大得多，所以没有做。
+
+**关窗口后程序去哪了？**
+
+收进了右下角通知区域。双击图标恢复界面，右键可以启停转发或退出。首次可能被放在 `^` 溢出区里，拖出来一次即可常显。
+
+## 更新日志
+
+### v0.2.0
+
+- 新增「手机熄屏」按钮：转发过程中一键关闭手机面板，镜像不断流
+- 新增托盘后台运行：关窗口 / 最小化收进通知区域，转发不中断；托盘菜单可直接启停、熄屏、退出
+- 移除「投屏时手机熄屏」勾选框，改由运行中的按钮控制
+- 修复：点关闭会连进程一起退出，托盘图标随之消失（`ShowDialog` 的模态循环在被 `Hide` 时直接结束）
+- 修复：熄屏按钮状态判断改读 `SurfaceFlinger` 的 `powerMode`，不再被 `dumpsys display` 的假状态误导
+
+### v0.1.0
+
+- 首次发布：音频 / 音视频双通道转发，Wi-Fi 与 USB 两种连接，图形界面
 
 ## 致谢
 

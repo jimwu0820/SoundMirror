@@ -28,6 +28,8 @@ if ($script:hasNative) {
     try { [void][NativeConsole]::SetCurrentProcessExplicitAppUserModelID('SoundMirror.App.1') } catch { }
 }
 
+$appVersion = '0.2.0'
+
 $scriptDir = $PSScriptRoot
 $scrcpyDir = Join-Path $scriptDir 'scrcpy\scrcpy-win64-v5.0.1'
 $adbExe    = Join-Path $scrcpyDir 'adb.exe'
@@ -78,7 +80,7 @@ $script:state = 'idle'
 $script:mode = 'wifi'
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'SoundMirror'
+$form.Text = "SoundMirror $appVersion"
 $form.ClientSize = New-Object System.Drawing.Size(420, 318)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
@@ -398,8 +400,8 @@ function Set-UiState([string]$State, [string]$Text) {
     # 托盘菜单和提示跟着状态走（托盘还没建好时跳过）
     if ($script:tray) {
         try {
-            if ($State -eq 'running') { $script:tray.Text = 'SoundMirror · 正在转发' }
-            else { $script:tray.Text = 'SoundMirror · 未连接' }
+            if ($State -eq 'running') { $script:tray.Text = "SoundMirror $appVersion · 正在转发" }
+            else { $script:tray.Text = "SoundMirror $appVersion · 未连接" }
             if ($script:miToggle) {
                 if ($State -eq 'running') { $script:miToggle.Text = '停止转发' }
                 else { $script:miToggle.Text = '开始转发' }
@@ -770,7 +772,7 @@ if (Test-Path $icoPath) {
 } else {
     $tray.Icon = $form.Icon
 }
-$tray.Text = 'SoundMirror · 未连接'
+$tray.Text = "SoundMirror $appVersion · 未连接"
 $tray.Visible = $true
 
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -836,7 +838,7 @@ $guardTimer.Start()
 Set-Mode 'wifi'
 Set-UiState 'idle'
 
-Add-Log '就绪'
+Add-Log "SoundMirror $appVersion 就绪"
 Add-Log '  Wi-Fi : 填手机 WLAN 里的 IP，端口固定 5555'
 Add-Log '  USB   : 选「USB 数据线」，无需 IP'
 Add-Log ''
