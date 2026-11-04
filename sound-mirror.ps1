@@ -13,6 +13,8 @@ public class NativeConsole {
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr LoadImage(IntPtr hinst, string name, uint type, int cx, int cy, uint fuLoad);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string AppID);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 }
 '@
     Add-Type -TypeDefinition $sig -ErrorAction Stop
@@ -299,7 +301,12 @@ $chkScreenOff.Font = $fBase
 $chkScreenOff.ForeColor = ToColor $C.TextSecond
 $chkScreenOff.BackColor = [System.Drawing.Color]::Transparent
 
-$btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 377 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
+$btnMain = New-PillButton -DisplayText '开始转发' -X 20 -Y 228 -W 266 -H 42 -Radius 11 -Fill $C.Primary -TextColor '#FFFFFF' -Border '' -FontSize 10
+
+# 运行时息屏：走 scrcpy 窗口的 MOD+o / MOD+Shift+o 快捷键。
+# 不能用 adb 的 power 键 —— 那会让设备真正休眠，采集端拿不到新帧，镜像直接黑掉。
+# scrcpy 的做法是只关显示面板、保留表面合成，所以画面照常传。
+$btnScreen = New-PillButton -DisplayText '手机息屏' -X 294 -Y 228 -W 103 -H 42 -Radius 11 -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark -FontSize 9.5 -HoverFill $C.SurfaceDim
 
 $lblError = New-Object System.Windows.Forms.Label
 $lblError.Text = ''
@@ -318,7 +325,7 @@ $lblOut.Font = $fSmall
 $lblOut.ForeColor = ToColor $C.TextTert
 $lblOut.BackColor = [System.Drawing.Color]::Transparent
 
-$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $btnMain, $lblError, $lblOut))
+$form.Controls.AddRange(@($lblDot, $lblState, $chip, $btnLog, $line, $lblSection, $btnWifi, $btnUsb, $lblIp, $pnlIp, $chkVideo, $chkScreenOff, $btnMain, $btnScreen, $lblError, $lblOut))
 
 $logForm = New-Object System.Windows.Forms.Form
 $logForm.Text = 'SoundMirror · Log'
@@ -528,6 +535,7 @@ function Start-Stream {
         $script:proc = [System.Diagnostics.Process]::Start($psi)
         Set-UiState 'running'
         $timer.Start()
+        $screenTimer.Start()
     } catch {
         Add-Log ('启动失败: ' + $_.Exception.Message)
         Show-Failure ('启动失败 · ' + $_.Exception.Message)
@@ -546,11 +554,95 @@ function Stop-Stream {
     }
 
     $timer.Stop()
+    $screenTimer.Stop()
+    Set-Pill -Ctrl $btnScreen -Display '手机息屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
     Set-UiState 'idle'
 }
 
 $btnMain.Add_Click({
     if ($script:state -eq 'running') { Stop-Stream } else { Start-Stream }
+})
+
+# ==== 运行时息屏 / 点亮 ====
+# 取当前设备的 adb 选择参数（USB 用 -d，Wi-Fi 用 -s ip:5555）
+function Get-AdbSelArgs {
+    if ($script:mode -eq 'usb') { return @('-d') }
+    $ip = $txtIp.Text.Trim()
+    if ($ip) { return @('-s', "${ip}:5555") }
+    return @()
+}
+
+# 读屏幕开关状态：dumpsys display 里的 mScreenState=ON/OFF
+function Get-PhoneScreenState {
+    try {
+        $sel = Get-AdbSelArgs
+        $out = (& $adbExe @sel shell dumpsys display 2>$null | Out-String)
+        if ($out -match 'mScreenState=(ON|OFF)') { return $matches[1] }
+    } catch { }
+    return ''
+}
+
+function Send-ScrcpyScreenShortcut([switch]$Wake) {
+    $hwnd = [IntPtr]::Zero
+    foreach ($p in @(Get-Process scrcpy -ErrorAction SilentlyContinue)) {
+        if ($p.MainWindowHandle -ne 0) { $hwnd = $p.MainWindowHandle; break }
+    }
+    if ($hwnd -eq [IntPtr]::Zero) { return $false }
+
+    $prev = [IntPtr]::Zero
+    try {
+        $prev = [NativeConsole]::GetForegroundWindow()
+        [void][NativeConsole]::ShowWindow($hwnd, 9)          # SW_RESTORE
+        [void][NativeConsole]::SetForegroundWindow($hwnd)
+        Start-Sleep -Milliseconds 220
+
+        $VK_MENU = 0x12; $VK_SHIFT = 0x10; $VK_O = 0x4F; $UP = 2
+        [NativeConsole]::keybd_event($VK_MENU, 0, 0, [UIntPtr]::Zero)
+        if ($Wake) { [NativeConsole]::keybd_event($VK_SHIFT, 0, 0, [UIntPtr]::Zero) }
+        [NativeConsole]::keybd_event($VK_O, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 70
+        [NativeConsole]::keybd_event($VK_O, 0, $UP, [UIntPtr]::Zero)
+        if ($Wake) { [NativeConsole]::keybd_event($VK_SHIFT, 0, $UP, [UIntPtr]::Zero) }
+        [NativeConsole]::keybd_event($VK_MENU, 0, $UP, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 200
+
+        if ($prev -ne [IntPtr]::Zero) { [void][NativeConsole]::SetForegroundWindow($prev) }
+    } catch {
+        return $false
+    }
+    return $true
+}
+
+function Update-ScreenButton {
+    $st = Get-PhoneScreenState
+    if ($st -eq 'OFF') { Set-Pill -Ctrl $btnScreen -Display '点亮屏幕' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark }
+    else { Set-Pill -Ctrl $btnScreen -Display '手机息屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark }
+}
+
+$btnScreen.Add_Click({
+    if (-not ($script:proc -and -not $script:proc.HasExited)) {
+        Add-Log '请先点「开始转发」，息屏控制只在投屏运行时可切换'
+        Add-Log '  静态息屏可以勾选「投屏时手机熄屏」，连接成功后自动关屏'
+        return
+    }
+
+    $state = Get-PhoneScreenState
+    if (-not $state) {
+        Add-Log '读不到手机屏幕状态，可能连接已断开'
+        return
+    }
+
+    $wantWake = ($state -eq 'OFF')
+    if (Send-ScrcpyScreenShortcut -Wake:$wantWake) {
+        Start-Sleep -Milliseconds 500
+        $now = Get-PhoneScreenState
+        if ($now -eq 'OFF') { Add-Log '手机屏幕已关闭，画面继续传输（点亮请再点一次本按钮）' }
+        elseif ($now -eq 'ON') { Add-Log '手机屏幕已点亮' }
+        Update-ScreenButton
+    } else {
+        Add-Log '没有找到镜像窗口，无法发送息屏指令'
+        Add-Log '  纯音频模式（未勾「同时显示手机画面」）没有窗口，请直接按手机电源键'
+    }
 })
 
 $btnWifi.Add_Click({ Set-Mode 'wifi' })
@@ -605,6 +697,14 @@ $uiTimer.Add_Tick({
     } catch { }
 })
 $uiTimer.Start()
+
+# 启动后等 scrcpy 窗口出来，刷新一次息屏按钮的文案（初始可能是退出时残留的熄屏状态）
+$screenTimer = New-Object System.Windows.Forms.Timer
+$screenTimer.Interval = 2500
+$screenTimer.Add_Tick({
+    $screenTimer.Stop()
+    if ($script:state -eq 'running') { Update-ScreenButton }
+})
 
 $guardTimer = New-Object System.Windows.Forms.Timer
 $guardTimer.Interval = 1200
