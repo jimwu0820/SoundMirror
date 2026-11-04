@@ -539,6 +539,11 @@ function Start-Stream {
         Set-ScreenLabel
         $btnScreen.Invalidate()
         $timer.Start()
+        # 勾了画面才等窗口；纯音频模式没有窗口，定时器会自己放弃
+        if ($chkVideo.Checked) {
+            $script:autoHideTries = 0
+            $script:autoHideTimer.Start()
+        }
     } catch {
         Add-Log ('启动失败: ' + $_.Exception.Message)
         Show-Failure ('启动失败 · ' + $_.Exception.Message)
@@ -557,6 +562,7 @@ function Stop-Stream {
     }
 
     $timer.Stop()
+    if ($script:autoHideTimer) { $script:autoHideTimer.Stop() }
     Set-ScreenLabel
     Set-UiState 'idle'
 }
@@ -853,6 +859,27 @@ function Show-Toast([string]$Title, [string]$Text) {
         $script:toastTimer.Start()
     } catch { }
 }
+
+# 开始转发后，等镜像窗口真正出现，就把主界面收进托盘 —— 屏幕留给投屏窗口
+$script:autoHideTries = 0
+$script:autoHideTimer = New-Object System.Windows.Forms.Timer
+$script:autoHideTimer.Interval = 400
+$script:autoHideTimer.Add_Tick({
+    $script:autoHideTimer.Stop()
+    if ($script:state -ne 'running') { return }
+    $sp = @(Get-Process scrcpy -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+    if ($sp.Count -eq 0) {
+        # 服务端推送 + 建窗口通常 1~2 秒，最多等 8 秒（纯音频模式永远等不到，就保持显示）
+        $script:autoHideTries++
+        if ($script:autoHideTries -lt 20) { $script:autoHideTimer.Start() }
+        return
+    }
+    $script:autoHideTries = 0
+    if ($form.Visible) {
+        Add-Log '  镜像窗口已出现，主界面收进托盘（双击托盘图标可回到界面）'
+        Hide-ToTray
+    }
+})
 
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $miShow   = $trayMenu.Items.Add('显示主界面')
