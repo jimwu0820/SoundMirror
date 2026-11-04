@@ -843,6 +843,11 @@ Add-Log ''
 Add-Log '键盘输入：连上后点一下镜像窗口让它获得焦点，即可直接打字。'
 Add-Log '  中文走手机输入法组词，手机上会看到候选词；打不出中文时用 Ctrl+V 粘贴兜底。'
 
-[void]$form.ShowDialog()
+# 用 Application.Run 而不是 ShowDialog：ShowDialog 是模态循环，Hide() 会让它直接返回，
+# 脚本走到结尾就退出进程 —— 表现就是「点了关闭，托盘图标也一起没了」。
+# Application.Run 的循环只在窗体真正关闭时结束，隐藏不受影响。
+[System.Windows.Forms.Application]::Run($form)
 
 try { $tray.Visible = $false; $tray.Dispose() } catch { }
+# 走到这里说明窗体已关闭；如果转发还开着（异常路径），把子进程收掉，别留孤儿
+if ($script:proc -and -not $script:proc.HasExited) { Stop-Stream }
