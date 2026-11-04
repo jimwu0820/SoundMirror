@@ -444,7 +444,7 @@ function Show-Failure([string]$msg) {
     Set-UiState 'error'
     # 收在托盘里的时候，出错要能让人看见
     if ($script:tray -and -not $form.Visible) {
-        try { $script:tray.ShowBalloonTip(4000, 'SoundMirror 出问题了', $msg, 'Warning') } catch { }
+        Show-Toast "SoundMirror $appVersion 出问题了" $msg
     }
 }
 
@@ -759,10 +759,7 @@ function Hide-ToTray {
     $form.Hide()
     if (-not $script:trayHinted) {
         $script:trayHinted = $true
-        try {
-            $tray.ShowBalloonTip(3000, 'SoundMirror 还在后台运行',
-                '双击右下角图标可以回到界面；要真正退出请右键选「退出」', 'Info')
-        } catch { }
+        Show-Toast "SoundMirror $appVersion 还在后台运行" '双击右下角图标可以回到界面；要真正退出请右键选「退出」'
     }
 }
 
@@ -774,6 +771,88 @@ if (Test-Path $icoPath) {
 }
 $tray.Text = "SoundMirror $appVersion · 未连接"
 $tray.Visible = $true
+
+# ==== 自绘提示窗 ====
+# 系统的「气球提示」是 NotifyIcon 发的，归属方是宿主进程（powershell.exe），
+# 所以通知栏永远显示「Windows PowerShell」+ PowerShell 图标，改设置无解。
+# 自己画一个小窗口，图标和名字才能是 SoundMirror 自己的。
+$script:toastForm = $null
+$script:toastTimer = New-Object System.Windows.Forms.Timer
+$script:toastTimer.Interval = 4500
+$script:toastTimer.Add_Tick({
+    $script:toastTimer.Stop()
+    if ($script:toastForm) { $script:toastForm.Hide() }
+})
+
+function New-ToastForm {
+    $t = New-Object System.Windows.Forms.Form
+    $t.FormBorderStyle = 'None'
+    $t.StartPosition = 'Manual'
+    $t.Size = New-Object System.Drawing.Size(364, 96)
+    $t.BackColor = [System.Drawing.Color]::FromArgb(32, 32, 32)
+    $t.TopMost = $true
+    $t.ShowInTaskbar = $false
+    $t.MinimizeBox = $false
+    $t.MaximizeBox = $false
+
+    $pic = New-Object System.Windows.Forms.PictureBox
+    $pic.Location = New-Object System.Drawing.Point(16, 18)
+    $pic.Size = New-Object System.Drawing.Size(32, 32)
+    $pic.SizeMode = 'Zoom'
+    $pic.BackColor = [System.Drawing.Color]::Transparent
+    try { if ($form.Icon) { $pic.Image = $form.Icon.ToBitmap() } } catch { }
+    $t.Controls.Add($pic)
+
+    $script:toastTitle = New-Object System.Windows.Forms.Label
+    $script:toastTitle.Location = New-Object System.Drawing.Point(60, 14)
+    $script:toastTitle.Size = New-Object System.Drawing.Size(288, 24)
+    $script:toastTitle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9.5, [System.Drawing.FontStyle]::Bold)
+    $script:toastTitle.ForeColor = [System.Drawing.Color]::White
+    $script:toastTitle.BackColor = [System.Drawing.Color]::Transparent
+    $t.Controls.Add($script:toastTitle)
+
+    $script:toastBody = New-Object System.Windows.Forms.Label
+    $script:toastBody.Location = New-Object System.Drawing.Point(60, 40)
+    $script:toastBody.Size = New-Object System.Drawing.Size(288, 44)
+    $script:toastBody.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 8.5)
+    $script:toastBody.ForeColor = [System.Drawing.Color]::FromArgb(206, 206, 206)
+    $script:toastBody.BackColor = [System.Drawing.Color]::Transparent
+    $t.Controls.Add($script:toastBody)
+
+    $t.Add_Paint({
+        param($s, $e)
+        $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(64, 64, 64), 1)
+        $e.Graphics.DrawRectangle($pen, 0, 0, $s.Width - 1, $s.Height - 1)
+        $pen.Dispose()
+    })
+
+    $close = {
+        if ($script:toastTimer) { $script:toastTimer.Stop() }
+        if ($script:toastForm) { $script:toastForm.Hide() }
+    }
+    $t.Add_Click($close)
+    $pic.Add_Click($close)
+    $script:toastTitle.Add_Click($close)
+    $script:toastBody.Add_Click($close)
+
+    return $t
+}
+
+function Show-Toast([string]$Title, [string]$Text) {
+    try {
+        if (-not $script:toastForm -or $script:toastForm.IsDisposed) { $script:toastForm = New-ToastForm }
+        $script:toastTitle.Text = $Title
+        $script:toastBody.Text = $Text
+        $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        $script:toastForm.Location = New-Object System.Drawing.Point(
+            ($wa.Right - $script:toastForm.Width - 14),
+            ($wa.Bottom - $script:toastForm.Height - 14))
+        if (-not $script:toastForm.Visible) { $script:toastForm.Show() }
+        $script:toastForm.BringToFront()
+        $script:toastTimer.Stop()
+        $script:toastTimer.Start()
+    } catch { }
+}
 
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $miShow   = $trayMenu.Items.Add('显示主界面')
