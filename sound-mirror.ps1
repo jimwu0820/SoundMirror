@@ -534,8 +534,7 @@ function Start-Stream {
     try {
         $script:proc = [System.Diagnostics.Process]::Start($psi)
         Set-UiState 'running'
-        # 勾了「投屏时手机熄屏」的话，scrcpy 连上就把面板关了，按钮文案要跟着是「点亮屏幕」
-        $script:screenOff = [bool]$chkScreenOff.Checked
+        # 勾了「投屏时手机熄屏」的话，scrcpy 连上就把面板关了
         Set-ScreenLabel
         $btnScreen.Invalidate()
         $timer.Start()
@@ -557,7 +556,6 @@ function Stop-Stream {
     }
 
     $timer.Stop()
-    $script:screenOff = $false
     Set-ScreenLabel
     Set-UiState 'idle'
 }
@@ -566,22 +564,19 @@ $btnMain.Add_Click({
     if ($script:state -eq 'running') { Stop-Stream } else { Start-Stream }
 })
 
-# ==== 运行时熄屏 / 点亮 ====
-# 两个方向必须用两套机制，是这台机器上一路实测出来的：
+# ==== 运行时熄屏 ====
+# 发 scrcpy 窗口的 MOD+o（MOD 默认左 Alt）。它只关 SurfaceFlinger 的显示电源，
+# 面板黑、合成继续，所以镜像不断——这也是唯一能「熄屏但不断流」的办法。
 #
-# 熄屏：发 scrcpy 窗口的 MOD+o（MOD 默认左 Alt）。它只关 SurfaceFlinger 的显示电源，
-#       面板黑、合成继续，所以镜像不断。
-# 点亮：MOD+Shift+o 能把 SF 的 powerMode 恢复成 On、亮度也是正常值，但**华为那边的背光不会回来**，
-#       屏幕依旧全黑 —— SF 的电源开关和 DisplayPowerController 是两套状态。唯一可靠的是走一次
-#       真实电源周期（KEYCODE_SLEEP 26 → KEYCODE_WAKEUP 224），由 DPC 把面板和背光一起拉起。
-#       代价是中途会短暂落到锁屏，事后用 wm dismiss-keyguard 尽力解掉。
+# 反向的点亮做不到自动化，已确认放弃：MOD+Shift+o 能把 SF 的 powerMode 恢复成 On、
+# 亮度读数也正常，但华为那边的背光不会回来（SF 的电源开关和 DisplayPowerController
+# 是两套状态机）；唯一能点亮的是走一次真实电源周期，而那会落到锁屏、要解锁，
+# 代价不划算。所以按钮只负责熄屏，点亮请按手机电源键。
 #
 # 状态判断读 dumpsys SurfaceFlinger 里物理屏那个 DisplayDevice 的 powerMode；scrcpy 自己会建一个
 # virtual 的同名显示，要跳过。dumpsys display 的 mScreenState 无论开关都报 ON，不能用。
 #
 # 送键走 AppActivate + SendKeys：本机安全策略拦 Add-Type，P/Invoke 那条路会静默失效。
-
-$script:screenOff = $false
 
 # USB 用 -d，Wi-Fi 用 -s ip:5555
 function Get-AdbSelArgs {
@@ -628,38 +623,13 @@ function Get-LogFrom([long]$pos) {
     return ''
 }
 
+# 熄屏用状态记录：只用于给日志一句准确的话，按钮文案固定为「手机熄屏」
 function Set-ScreenLabel {
-    if ($script:screenOff) {
-        Set-Pill -Ctrl $btnScreen -Display '点亮屏幕' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
-    } else {
-        Set-Pill -Ctrl $btnScreen -Display '手机熄屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
-    }
+    Set-Pill -Ctrl $btnScreen -Display '手机熄屏' -Fill $C.Surface -TextColor $C.PrimaryDeep -Border $C.BorderDark
 }
 
-# 点亮用：两步。先让 scrcpy 把 SurfaceFlinger 的显示电源恢复成 On，
-# 再让系统电源状态机真正走一次「关→开」，背光才会跟着回来。
-function Invoke-PanelWake {
-    # 1) SF 层恢复（这一步本身不会点亮面板）
-    [void](Send-ScrcpyScreenKey -Wake:$true)
-    Start-Sleep -Milliseconds 450
-
-    # 2) 真实电源周期：睡着就直接唤醒，醒着就先睡再醒（DPC 只有走完这一趟才会重新上背光）
-    try {
-        $sel = Get-AdbSelArgs
-        $w = (& $adbExe @sel shell dumpsys power 2>$null | Out-String)
-        if ($w -notmatch 'mWakefulness=Asleep') {
-            & $adbExe @sel shell input keyevent 26 2>$null | Out-Null
-            Start-Sleep -Milliseconds 250
-        }
-        & $adbExe @sel shell input keyevent 224 2>$null | Out-Null
-        Start-Sleep -Milliseconds 700
-        & $adbExe @sel shell wm dismiss-keyguard 2>$null | Out-Null
-        return 'ok'
-    } catch { return 'adb_error' }
-}
-
-# 往镜像窗口送一次 MOD+o / MOD+Shift+o，返回 ok / no_window / no_com / no_focus / no_effect / send_error:xxx
-function Send-ScrcpyScreenKey([switch]$Wake) {
+# 往镜像窗口送一次 MOD+o，返回 ok / no_window / no_com / no_focus / no_effect / send_error:xxx
+function Send-ScrcpyScreenKey {
     $sp = @(Get-Process scrcpy -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
     if ($sp.Count -eq 0) { return 'no_window' }
 
@@ -677,8 +647,7 @@ function Send-ScrcpyScreenKey([switch]$Wake) {
 
     Start-Sleep -Milliseconds 180
     try {
-        if ($Wake) { [System.Windows.Forms.SendKeys]::SendWait('%+o') }
-        else { [System.Windows.Forms.SendKeys]::SendWait('%o') }
+        [System.Windows.Forms.SendKeys]::SendWait('%o')
     } catch {
         $msg = $_.Exception.Message
         try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
@@ -695,62 +664,37 @@ function Send-ScrcpyScreenKey([switch]$Wake) {
     for ($i = 0; $i -lt 12; $i++) {
         Start-Sleep -Milliseconds 120
         $new = Get-LogFrom $before
-        if ($new -and ($new -match 'Device display turned (on|off)')) {
-            if ($new -match 'Device display turned off') { $script:screenOff = $true }
-            elseif ($new -match 'Device display turned on') { $script:screenOff = $false }
-            else { $script:screenOff = -not $Wake }
-            return 'ok'
-        }
+        if ($new -and ($new -match 'Device display turned (on|off)')) { return 'ok' }
     }
     return 'no_effect'
 }
 
 $btnScreen.Add_Click({
     if (-not (Test-IsStreaming)) {
-        Add-Log '需要先点「开始转发」——熄屏控制要切镜像窗口的快捷键，没有窗口就无从发起'
+        Add-Log '需要先点「开始转发」——熄屏是切镜像窗口的快捷键，没有窗口就无从发起'
         Add-Log '  想在连上时就熄屏，勾「投屏时手机熄屏」即可'
         return
     }
 
-    # 以手机真实状态为准，不看按钮上写的字（用户可能在镜像窗口里自己按过快捷键）
+    # 先读手机真实状态，已经是关的就不白发一次（点亮本程序不再负责）
     $cur = Get-PanelPowerMode
-    if ($cur) { $script:screenOff = ($cur -eq 'Off') }
-
-    if ($script:screenOff) {
-        Add-Log '正在点亮手机屏幕…'
-        $form.Refresh()
-        $r = Invoke-PanelWake
-        if ($r -ne 'ok') {
-            Add-Log '点亮失败：adb 命令没有执行成功，检查连接是否还在'
-        } else {
-            $now = Get-PanelPowerMode
-            if ($now -eq 'Off' -or -not $now) {
-                Add-Log '点亮指令已发出，但手机仍报告屏是关的，再点一次试试'
-            } else {
-                Add-Log '手机屏幕已点亮'
-                $kw = ''
-                try { $kw = (& $adbExe @(Get-AdbSelArgs) shell "dumpsys window | grep isKeyguardShowing" 2>$null | Out-String) } catch { }
-                if ($kw -match 'isKeyguardShowing=true') {
-                    Add-Log '  手机停在锁屏：华为这边点亮只能借电源周期，滑一下或解锁即可'
-                }
-            }
-        }
-    } else {
-        Add-Log '正在关闭手机屏幕…'
-        $form.Refresh()
-        $r = Send-ScrcpyScreenKey -Wake:$false
-        switch ($r) {
-            'ok' { Add-Log '手机屏幕已关闭，画面继续传输（再点一次可点亮）' }
-            'no_window' { Add-Log '没有找到镜像窗口（纯音频模式没有窗口），这种情况直接按手机电源键' }
-            'no_com' { Add-Log '系统拦住了按键模拟通道，无法自动熄屏，请直接按手机电源键' }
-            'no_focus' { Add-Log '切不过去镜像窗口（可能被全屏程序占着），先点一下镜像窗口再点本按钮' }
-            'no_effect' { Add-Log '指令发出去了但 scrcpy 没响应，先点一下镜像窗口再试一次' }
-            default { Add-Log ('发送失败: ' + $r) }
-        }
+    if ($cur -eq 'Off') {
+        Add-Log '手机屏幕现在已经是关闭状态'
+        Add-Log '  要点亮请按一下手机电源键（熄屏走的是 SurfaceFlinger，不会真休眠，按一下就回来）'
+        return
     }
 
-    $st = Get-PanelPowerMode
-    if ($st) { $script:screenOff = ($st -eq 'Off') }
+    Add-Log '正在关闭手机屏幕…'
+    $form.Refresh()
+    $r = Send-ScrcpyScreenKey
+    switch ($r) {
+        'ok' { Add-Log '手机屏幕已关闭，画面继续传输；点亮请按手机电源键' }
+        'no_window' { Add-Log '没有找到镜像窗口（纯音频模式没有窗口），这种情况直接按手机电源键' }
+        'no_com' { Add-Log '系统拦住了按键模拟通道，无法自动熄屏，请直接按手机电源键' }
+        'no_focus' { Add-Log '切不过去镜像窗口（可能被全屏程序占着），先点一下镜像窗口再点本按钮' }
+        'no_effect' { Add-Log '指令发出去了但 scrcpy 没响应，先点一下镜像窗口再试一次' }
+        default { Add-Log ('发送失败: ' + $r) }
+    }
     Set-ScreenLabel
     $btnScreen.Invalidate()
 })
