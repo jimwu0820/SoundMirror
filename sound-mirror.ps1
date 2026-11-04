@@ -28,7 +28,7 @@ if ($script:hasNative) {
     try { [void][NativeConsole]::SetCurrentProcessExplicitAppUserModelID('SoundMirror.App.1') } catch { }
 }
 
-$appVersion = '0.2.1'
+$appVersion = '0.2.2'
 
 $scriptDir = $PSScriptRoot
 $scrcpyDir = Join-Path $scriptDir 'scrcpy\scrcpy-win64-v5.0.1'
