@@ -539,6 +539,8 @@ function Start-Stream {
         Set-ScreenLabel
         $btnScreen.Invalidate()
         $timer.Start()
+        # 手机别睡觉，否则采集断帧 → 电脑上是黑屏
+        Enable-StayAwake
         # 勾了画面才等窗口；纯音频模式没有窗口，定时器会自己放弃
         if ($chkVideo.Checked) {
             $script:autoHideTries = 0
@@ -555,6 +557,9 @@ function Stop-Stream {
         try { $script:proc.Kill() } catch { }
     }
     Get-Process scrcpy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+    # 先恢复锁屏设置，再断连接（Wi-Fi 模式下断连之后 adb 就发不出命令了）
+    Disable-StayAwake
 
     if ($script:mode -eq 'wifi') {
         $ip = $txtIp.Text.Trim()
@@ -603,6 +608,62 @@ function Get-PanelPowerMode {
         }
     } catch { }
     return ''
+}
+
+# ==== 转发期间让手机常亮 ====
+# 手机默认 1 分钟自动锁屏，一睡下去 scrcpy 就断帧，电脑上就是黑屏（实测睡时 flips 三秒只 +1）。
+# 做法：转发期间把 screen_off_timeout 顶到最大、stay_on_while_plugged_in 设 7，
+# 结束时按原值恢复。原值先落盘，程序被强杀下次启动还能补恢复。
+$awakeFile = Join-Path $scriptDir 'awake-state.txt'
+$script:awakeState = $null
+
+function Read-AwakeState {
+    try {
+        if (Test-Path -LiteralPath $awakeFile) {
+            $raw = (Get-Content -LiteralPath $awakeFile -Raw -ErrorAction SilentlyContinue)
+            if ($raw) {
+                $parts = $raw.Trim() -split '\|'
+                if ($parts.Count -ge 2 -and $parts[0] -match '^\d+$') {
+                    return @{ Timeout = $parts[0]; StayOn = $parts[1] }
+                }
+            }
+        }
+    } catch { }
+    return $null
+}
+
+function Enable-StayAwake {
+    if ($script:awakeState) { return }
+    try {
+        $sel = Get-AdbSelArgs
+        $prev = Read-AwakeState
+        if (-not $prev) {
+            $to = (& $adbExe @sel shell settings get system screen_off_timeout 2>$null | Out-String).Trim()
+            $so = (& $adbExe @sel shell settings get global stay_on_while_plugged_in 2>$null | Out-String).Trim()
+            if ($to -notmatch '^\d+$') { return }          # 读不到就别乱改
+            if ($so -notmatch '^\d+$') { $so = '0' }
+            $prev = @{ Timeout = $to; StayOn = $so }
+        }
+        $script:awakeState = $prev
+        Set-Content -LiteralPath $awakeFile -Value ("{0}|{1}" -f $prev.Timeout, $prev.StayOn) -Encoding ASCII
+        & $adbExe @sel shell settings put system screen_off_timeout 2147483647 2>$null | Out-Null
+        & $adbExe @sel shell settings put global stay_on_while_plugged_in 7 2>$null | Out-Null
+        Add-Log '手机已设为常亮（转发结束后恢复原来的自动锁屏时间）'
+    } catch {
+        Add-Log '提示: 设置常亮失败，手机可能会自动锁屏导致画面停住'
+    }
+}
+
+function Disable-StayAwake {
+    if (-not $script:awakeState) { return }
+    try {
+        $sel = Get-AdbSelArgs
+        & $adbExe @sel shell settings put system screen_off_timeout $script:awakeState.Timeout 2>$null | Out-Null
+        & $adbExe @sel shell settings put global stay_on_while_plugged_in $script:awakeState.StayOn 2>$null | Out-Null
+        Add-Log '已恢复手机的自动锁屏时间'
+    } catch { }
+    $script:awakeState = $null
+    try { Remove-Item -LiteralPath $awakeFile -Force -ErrorAction SilentlyContinue } catch { }
 }
 
 function Test-IsStreaming {
@@ -950,6 +1011,21 @@ Add-Log '  USB   : 选「USB 数据线」，无需 IP'
 Add-Log ''
 Add-Log '键盘输入：连上后点一下镜像窗口让它获得焦点，即可直接打字。'
 Add-Log '  中文走手机输入法组词，手机上会看到候选词；打不出中文时用 Ctrl+V 粘贴兜底。'
+
+# 上次被强杀可能把手机留成常亮，这里补一次恢复（要读回确认成功才删记录）
+try {
+    $stale = Read-AwakeState
+    if ($stale) {
+        $sel = Get-AdbSelArgs
+        & $adbExe @sel shell settings put system screen_off_timeout $stale.Timeout 2>$null | Out-Null
+        & $adbExe @sel shell settings put global stay_on_while_plugged_in $stale.StayOn 2>$null | Out-Null
+        $now = (& $adbExe @sel shell settings get system screen_off_timeout 2>$null | Out-String).Trim()
+        if ($now -eq $stale.Timeout) {
+            Remove-Item -LiteralPath $awakeFile -Force -ErrorAction SilentlyContinue
+            Add-Log '已恢复上次转发遗留的手机锁屏设置'
+        }
+    }
+} catch { }
 
 # 用 Application.Run 而不是 ShowDialog：ShowDialog 是模态循环，Hide() 会让它直接返回，
 # 脚本走到结尾就退出进程 —— 表现就是「点了关闭，托盘图标也一起没了」。
