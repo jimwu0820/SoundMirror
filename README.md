@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.2-blue">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.2.3-blue">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey">
   <img alt="PowerShell" src="https://img.shields.io/badge/PowerShell-5.1%2B-5391FE">
 </p>
@@ -153,6 +153,11 @@ scrcpy 有音频缓冲管理，一般比老的 sndcpy 稳很多。若长时间�
 收进了右下角通知区域。双击图标恢复界面，右键可以启停转发或退出。首次可能被放在 `^` 溢出区里，拖出来一次即可常显。
 
 ## 更新日志
+
+### v0.2.3
+
+- 修复：转发一段时间后电脑端画面停住（手机自动锁屏导致采集断帧）。现在转发期间保持手机常亮，停止时按原值恢复
+- 修复：读屏幕状态、下发 adb 设置的那几个调用因为参数丢失而静默失效
 
 ### v0.2.2
 
