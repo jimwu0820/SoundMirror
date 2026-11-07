@@ -601,7 +601,7 @@ function Get-AdbSelArgs {
 # 物理屏的真实电源状态：On / Off，读不到返回空串
 function Get-PanelPowerMode {
     try {
-        $sel = Get-AdbSelArgs
+        $sel = @(Get-AdbSelArgs)
         $txt = (& $adbExe @sel shell dumpsys SurfaceFlinger 2>$null | Out-String)
         foreach ($m in [regex]::Matches($txt, 'DisplayDevice\{([^}]*)\}\s*powerMode=(\w+)')) {
             if ($m.Groups[1].Value -notmatch 'virtual') { return $m.Groups[2].Value }
@@ -635,12 +635,15 @@ function Read-AwakeState {
 function Enable-StayAwake {
     if ($script:awakeState) { return }
     try {
-        $sel = Get-AdbSelArgs
+        $sel = @(Get-AdbSelArgs)
         $prev = Read-AwakeState
         if (-not $prev) {
             $to = (& $adbExe @sel shell settings get system screen_off_timeout 2>$null | Out-String).Trim()
             $so = (& $adbExe @sel shell settings get global stay_on_while_plugged_in 2>$null | Out-String).Trim()
-            if ($to -notmatch '^\d+$') { return }          # 读不到就别乱改
+            if ($to -notmatch '^\d+$') {
+                Add-Log '提示: 读不到手机的自动锁屏设置，本次不做常亮处理'
+                return
+            }
             if ($so -notmatch '^\d+$') { $so = '0' }
             $prev = @{ Timeout = $to; StayOn = $so }
         }
@@ -656,14 +659,21 @@ function Enable-StayAwake {
 
 function Disable-StayAwake {
     if (-not $script:awakeState) { return }
+    $ok = $false
     try {
-        $sel = Get-AdbSelArgs
+        $sel = @(Get-AdbSelArgs)
         & $adbExe @sel shell settings put system screen_off_timeout $script:awakeState.Timeout 2>$null | Out-Null
         & $adbExe @sel shell settings put global stay_on_while_plugged_in $script:awakeState.StayOn 2>$null | Out-Null
-        Add-Log '已恢复手机的自动锁屏时间'
+        $now = (& $adbExe @sel shell settings get system screen_off_timeout 2>$null | Out-String).Trim()
+        $ok = ($now -eq [string]$script:awakeState.Timeout)
     } catch { }
-    $script:awakeState = $null
-    try { Remove-Item -LiteralPath $awakeFile -Force -ErrorAction SilentlyContinue } catch { }
+    if ($ok) {
+        Add-Log '已恢复手机的自动锁屏时间'
+        $script:awakeState = $null
+        try { Remove-Item -LiteralPath $awakeFile -Force -ErrorAction SilentlyContinue } catch { }
+    } else {
+        Add-Log '提示: 没能恢复自动锁屏时间，下次启动会自动再试一次'
+    }
 }
 
 function Test-IsStreaming {
@@ -1016,7 +1026,7 @@ Add-Log '  中文走手机输入法组词，手机上会看到候选词；打不
 try {
     $stale = Read-AwakeState
     if ($stale) {
-        $sel = Get-AdbSelArgs
+        $sel = @(Get-AdbSelArgs)
         & $adbExe @sel shell settings put system screen_off_timeout $stale.Timeout 2>$null | Out-Null
         & $adbExe @sel shell settings put global stay_on_while_plugged_in $stale.StayOn 2>$null | Out-Null
         $now = (& $adbExe @sel shell settings get system screen_off_timeout 2>$null | Out-String).Trim()
